@@ -1,0 +1,14 @@
+fastapi
+aiofiles
+uvicorn[standard]
+pydantic
+PyYAML
+openai
+google-genai
+anthropic
+customtkinter
+python-multipart
+motor
+pymongo
+httpx
+pytest
