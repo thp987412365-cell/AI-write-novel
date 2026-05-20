@@ -1,110 +1,209 @@
 # AI Novel Generator
 
-[中文文档](./README.zh-CN.md) | English
+AI Novel Generator 是一个基于多 LLM 的智能小说创作平台。只需输入一句话创意，即可通过多个 AI Agent 的协同工作，自动完成世界观构建、角色设计、剧情大纲规划和逐章写作，最终生成一部完整的长篇小说。
 
-AI Novel Generator is an AI-assisted novel creation project. The repository currently contains:
+## 功能概览
 
-- a FastAPI backend for configuration, novel, volume, upload, and AI workflow APIs
-- a Next.js frontend that is being rebuilt
-- a Windows desktop launcher that can start the backend and frontend together
+### 🧠 AI Agent 流水线
 
-## Current Status
+项目的核心是一套多步骤 LLM 流水线，由多个专业化的「Agent」协同完成小说创作的全流程：
 
-This project is still under an ongoing refactor and is not yet considered feature-complete.
+| Agent | 职责 | 说明 |
+|-------|------|------|
+| **创意展开 Agent** | 故事扩写 | 将一句话创意扩展为一篇约 3000 字的完整故事，覆盖从开端到结局的完整叙事弧线 |
+| **要素提炼 Agent** | 结构化提取 | 从扩展故事中提取小说类型、基调、目标读者和核心设想等结构化要素 |
+| **世界观构建 Agent** | 世界观生成 | 生成世界观设定、力量体系、历史时间线和驱动剧情的关键事件 |
+| **实体生成 Agent** | 角色/势力创建 | 批量创建小说的角色（含性格/背景）、势力、地点、物品、规则以及角色间关系 |
+| **大纲规划 Agent** | 章节大纲 | 生成逐章剧情大纲，确保全书叙事连贯（可选结合知识库素材） |
+| **章节续写 Agent** | 正文写作 | 基于完整上下文（所有实体卡片 + 最近章节摘要 + 大纲 + 知识库参考）逐章撰写正文 |
+| **实体提取 Agent** | 实体维护 | 从新写章节中自动识别新角色、地点、物品等，持久化到数据库，保证随着故事推进世界观保持一致性 |
+| **格式校验 Agent** | 输出校验 | 即使模型不支持原生 JSON 模式，也能验证并自动修正 LLM 输出，确保结构化数据完整性 |
 
-- interfaces, folder structure, and workflows may continue to change
-- some features from earlier iterations may be incomplete or temporarily unavailable
-- if you need the previous version, please check the `main` branch
+### 🔄 核心创作流程
 
-## Requirements
+平台采用**渐进式细化**流水线：
+
+```
+用户创意（一句话）
+    │
+    ▼
+┌─────────────────────────────┐
+│  Step 1: 创意展开            │  Agent: 创意展开
+│  一句话 → 3000字完整故事      │
+└──────────────┬──────────────┘
+               │
+               ▼
+┌─────────────────────────────┐
+│  Step 2: 要素提炼            │  Agent: 要素提炼
+│  提取类型/基调/核心设想        │
+└──────────────┬──────────────┘
+               │
+               ▼
+┌─────────────────────────────┐
+│  Step 3: 世界观构建          │  Agent: 世界观构建
+│  世界观/力量体系/时间线        │
+└──────────────┬──────────────┘
+               │
+               ▼
+┌─────────────────────────────┐
+│  Step 4: 小说元信息          │  Agent: novel_meta
+│  书名/简介/标签              │
+└──────────────┬──────────────┘
+               │
+               ▼
+┌─────────────────────────────┐
+│  Step 5-10: 实体生成        │  Agent: 实体生成
+│  角色/势力/地点/物品/规则/关系 │
+└──────────────┬──────────────┘
+               │
+               ▼
+┌─────────────────────────────┐
+│  剧情大纲生成                │  Agent: 大纲规划
+│  逐章大纲（可选结合知识库）    │
+└──────────────┬──────────────┘
+               │
+               ▼
+┌─────────────────────────────┐
+│  章节写作（循环）             │  Agent: 章节续写
+│  每章写入后 → 实体提取        │  + 实体提取
+│  自动提取新实体 → 更新世界观   │
+│  逐章推进 → 直至完本          │
+└─────────────────────────────┘
+```
+
+### 🏗️ 多 LLM 架构
+
+- **多提供商支持**：OpenAI、DeepSeek、Claude、Gemini — 可按工作流步骤自由配置
+- **三级 Provider 回退**：步骤级 → 工作流级 → 全局默认，确保容错连续性
+- **JSON Schema 结构化输出**：模型支持时，响应保证符合预定义结构；不支持时由格式校验 Agent 验证并自动修正
+- **SSE 流式推送**：所有 AI 生成接口均通过 Server-Sent Events 实时推送进度，用户可看到每个步骤的执行状态
+
+### 📚 知识库集成
+
+- 内置 Markdown 知识库，用于存储世界观素材、角色背景、场景设定等
+- 知识文档可关联到指定小说，并在大纲规划和章节写作中作为上下文注入
+- 支持通过 API 和前端界面进行增删改查
+
+### 🌐 上下文感知章节写作
+
+章节续写 Agent 在每次生成新章节时，会接收丰富的上下文包：
+- 小说元信息（书名、简介、类型、基调）
+- 全部实体：角色（含完整卡片）、地点、势力、物品、规则
+- 角色间关系图谱
+- 最近若干章的摘要
+- 大纲中即将到来的剧情节点
+- 可选的知识库参考内容
+
+**Token 预算机制**（30K 字符上限）会智能地对近期活跃的实体展示完整卡片，非活跃实体仅展示名称和一句话定位——在防止上下文溢出的同时保持世界观一致性。
+
+### 🎨 Web 前端
+
+基于 Next.js（App Router）构建，包含三大功能模块：
+
+- **书架**：小说列表、AI 一键创建向导、回收站（软删除机制）
+- **写作工作台**：章节编辑器、角色/地点/势力/物品/规则卡片、角色关系图谱、剧情大纲看板
+- **设置面板**：LLM 提供商实时配置、数据库设置、知识库管理、工作流自定义
+- **国际化**：中英文切换
+
+## 当前状态
+
+该项目目前仍处于重构过程中，尚未完成，也不应视为稳定版本。
+
+- 接口、目录结构和工作流仍可能继续调整
+- 旧功能有一部分可能尚未迁移完成，或处于临时不可用状态
+- 如果你需要之前的版本，请查看 `main` 分支
+
+## 运行前准备
+
+需要先准备以下环境：
 
 - Python 3
 - MongoDB
-- Node.js and npm for the frontend
+- Node.js 与 npm（前端需要）
 
-## Configuration
+## 配置说明
 
-Application configuration is loaded from `application/config/config.yaml`.
+项目运行时配置读取自 `application/config/config.yaml`。
 
-On first run, the project will ensure the following files exist:
+首次运行时，项目会自动确保以下文件存在：
 
 - `application/config/config_default.yaml`
 - `application/config/config.yaml`
 
-Before running AI-related features, update the LLM provider settings in `application/config/config.yaml`, especially:
+如果要使用 AI 相关功能，请先在 `application/config/config.yaml` 中补充或修改大模型配置，重点包括：
 
 - `api_key`
-- `base_url` where applicable
-- `default_provider` and workflow provider mapping
-- `use_system_proxy` if you explicitly want the SDK to inherit your Windows/system proxy. The default is `false`.
+- 部分提供商需要的 `base_url`
+- `default_provider` 以及各工作流步骤对应的 provider 配置
+- 如果你明确需要让 SDK 继承 Windows / 系统代理，可设置 `use_system_proxy: true`；默认值为 `false`
 
-You should also make sure MongoDB is running locally if you use the default database settings.
+如果使用默认数据库配置，还需要确保本地 MongoDB 已启动。
 
-Configuration can be edited through the frontend settings interface or by directly modifying the YAML files mentioned above.
+配置编辑可以在前端的设置界面进行，或直接编辑上述 YAML 文件。
 
-## Install
+## 安装依赖
 
-Install Python dependencies:
+安装 Python 依赖：
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Install frontend dependencies:
+安装前端依赖：
 
 ```bash
 cd frontend
 npm install
 ```
 
-## Run
+## 运行方式
 
-### Option 1: Windows launcher
+### 方式一：Windows 启动器
 
-The quickest Windows entry point is:
+Windows 下最直接的启动方式是：
 
 ```bat
 start.bat
 ```
 
-This starts the desktop launcher, which can then start:
+启动后可通过桌面启动器分别或同时启动：
 
-- backend: `http://127.0.0.1:8000`
-- API docs: `http://127.0.0.1:8000/docs`
-- frontend: `http://localhost:3000`
+- 后端：`http://127.0.0.1:8000`
+- 接口文档：`http://127.0.0.1:8000/docs`
+- 前端：`http://localhost:3000`
 
-### Option 2: Run backend manually
+### 方式二：手动启动后端
 
 ```bash
 python main.py
 ```
 
-Enable backend debug logging and raw AI response output:
+如果需要输出更完整的后端调试日志，并在控制台打印 AI 原始响应内容，可以这样启动：
 
 ```bash
 python main.py --debug
 ```
 
-When you use the Windows launcher, you can enable the backend checkbox labeled `后端调试日志` before starting the backend.
+如果通过 Windows 启动器启动，在启动后端前勾选 `后端调试日志` 即可。
 
-### Option 3: Run frontend manually
+### 方式三：手动启动前端
 
 ```bash
 cd frontend
 npm run dev
 ```
 
-## Tests
+## 测试
 
-Example test commands:
+可参考以下命令：
 
 ```bash
 python -m tests.test_volumes
 python -m tests.test_llm openai
 ```
 
-Some tests require local services or valid model credentials.
+部分测试依赖本地服务或有效的大模型密钥。
 
-## Notes
+## 说明
 
-This README intentionally documents the current refactor state only. If the current branch does not match the workflow you expect, review the `main` branch for the earlier implementation.
+本 README 只描述当前重构中的项目状态。如果你要查看更早期、相对完整的版本，请直接切换到 `main` 分支查看。
